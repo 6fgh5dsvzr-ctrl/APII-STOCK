@@ -1984,6 +1984,7 @@ export default function StockAPII() {
           units={aSignaler}
           masques={masquesASignaler}
           emails={alertEmails}
+          users={users}
           isAdmin={me.role === 'admin'}
           onAdd={addEmail}
           onRemove={removeEmail}
@@ -2733,9 +2734,13 @@ function PerduSheet({ masque, onClose, onSave }) {
   );
 }
 
-function AlertesPanel({ units, masques, emails, isAdmin, onAdd, onRemove, onSent }) {
+function AlertesPanel({ units, masques, emails, users, isAdmin, onAdd, onRemove, onSent }) {
   const [mail, setMail] = useState('');
   const valide = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail.trim());
+
+  const emailsUtilisateurs = (users || [])
+    .filter((u) => u.email && !emails.includes(u.email.trim().toLowerCase()))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const depasses = units.filter((u) => daysUntil(prochaineRevision(u)) < 0);
   const aVenir = units.filter((u) => daysUntil(prochaineRevision(u)) >= 0);
@@ -2835,6 +2840,23 @@ function AlertesPanel({ units, masques, emails, isAdmin, onAdd, onRemove, onSent
           </div>
         ))}
       </div>
+
+      {isAdmin && emailsUtilisateurs.length > 0 && (
+        <div className="flex flex-col gap-2 mb-3">
+          <p className="text-xs" style={{ color: C.soft }}>Depuis les profils utilisateurs :</p>
+          {emailsUtilisateurs.map((u) => (
+            <button key={u.id} onClick={() => onAdd(u.email.trim().toLowerCase())}
+              className="rounded-lg px-4 py-2.5 flex items-center justify-between gap-3 text-left"
+              style={{ background: C.surface, border: `1px solid ${C.border}` }}>
+              <span className="min-w-0">
+                <span className="text-sm font-medium truncate block">{u.name}</span>
+                <span className="text-xs truncate block" style={{ color: C.soft }}>{u.email}</span>
+              </span>
+              <Plus size={16} color={C.soft} className="flex-shrink-0" />
+            </button>
+          ))}
+        </div>
+      )}
 
       {isAdmin ? (
         <div className="flex gap-2 mb-6">

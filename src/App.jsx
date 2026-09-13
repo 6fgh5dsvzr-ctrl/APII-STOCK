@@ -5,6 +5,7 @@ import {
   Droplets, Ban, Keyboard, Undo2, LogOut, UserRound, UserRoundPlus,
   CalendarClock, Mail, Send, BellRing, Briefcase, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Hammer, Archive, RotateCcw, FileDown, Link2, Shield,
 } from 'lucide-react';
+import { supabase } from './lib/supabaseClient';
 
 /* ---------------------------------------------------------------
    Générateur de QR code (mode octet, correction M, versions 1-4)
@@ -1341,7 +1342,7 @@ export default function StockAPII() {
     const rang = commandes.filter((c) => c.type === type).length + 1;
     const cmd = {
       id: uid(), num: `${prefixe}-${String(rang).padStart(3, '0')}`,
-      type, affaireId: d.affaireId, chantier: libelleAffaire(affaire),
+      type, affaireId: d.affaireId, chantier: libelleAffaire(affaire), adresse: affaire ? (affaire.adresse || '') : '',
       demandeur: me.name, demandeurRole: me.role,
       dateLivraison: d.dateLivraison, note: d.note,
       unitIds: d.unitIds, consos: d.consos, outils: d.outils || [], statut: 'a_preparer',
@@ -1356,8 +1357,7 @@ export default function StockAPII() {
       }),
     });
     setModal(null); setFormCmd(null);
-    if (type === 'appoint') setNotifier(cmd);
-    else setOpenCommande(cmd.id);
+    setNotifier(cmd);
   }
 
   /* Liens documentaires (notice d'utilisation, fiche de révision) : de simples
@@ -1521,7 +1521,7 @@ export default function StockAPII() {
   /* ---------- affaires ---------- */
 
   function addAffaire(d) {
-    const a = { id: uid(), numero: d.numero, libelle: d.libelle, ouverte: true };
+    const a = { id: uid(), numero: d.numero, libelle: d.libelle, adresse: d.adresse || '', ouverte: true };
     persist({ affaires: [a, ...affaires], journal: log({ type: 'affaire', label: libelleAffaire(a), detail: 'Affaire ouverte' }) });
   }
   function toggleAffaire(a) {
@@ -2091,8 +2091,8 @@ export default function StockAPII() {
       )}
       {notifier && (
         <NotifierSheet commande={notifier} users={users} units={units} refs={refs}
-          onClose={() => { setNotifier(null); setOpenCommande(null); }}
-          onSent={(c, n) => persist({ journal: log({ type: 'alerte', label: c.num, detail: `Notification d'appoint envoyée à ${n} destinataire(s)` }) })} />
+          onClose={() => { const id = notifier.id; setNotifier(null); setOpenCommande(id); }}
+          onSent={(c, n) => persist({ journal: log({ type: 'alerte', label: c.num, detail: `${TYPES_CMD[c.type].label} — notification envoyée à ${n} destinataire(s)` }) })} />
       )}
 
       {openUnit && (
@@ -3716,6 +3716,7 @@ function AffairesInline({ affaires, commandes, canManage, selected, onSelect, on
   const [voirCloturees, setVoirCloturees] = useState(false);
   const [numero, setNumero] = useState('');
   const [libelle, setLibelle] = useState('');
+  const [adresse, setAdresse] = useState('');
   const ok = numero.trim() && libelle.trim();
 
   const ouvertes = affaires.filter((a) => a.ouverte);
@@ -3738,6 +3739,7 @@ function AffairesInline({ affaires, commandes, canManage, selected, onSelect, on
               )}
             </div>
             <p className="text-xs truncate mt-0.5" style={{ color: C.soft }}>{a.libelle}</p>
+            {a.adresse && <p className="text-[11px] truncate mt-0.5" style={{ color: C.soft }}>{a.adresse}</p>}
           </button>
           {canManage && (
             <button onClick={() => onToggle(a)} className="px-3 text-[10px] font-semibold flex-shrink-0"
@@ -3794,13 +3796,15 @@ function AffairesInline({ affaires, commandes, canManage, selected, onSelect, on
               <input style={{ ...inputStyle, gridColumn: 'span 1' }} value={numero} onChange={(e) => setNumero(e.target.value)} placeholder="A-2607" />
               <input style={{ ...inputStyle, gridColumn: 'span 2' }} value={libelle} onChange={(e) => setLibelle(e.target.value)} placeholder="Libellé du chantier" />
             </div>
+            <input style={inputStyle} className="mb-2" value={adresse} onChange={(e) => setAdresse(e.target.value)}
+              placeholder="Adresse de livraison (optionnel)" />
             <div className="flex gap-2">
-              <button onClick={() => { setForm(false); setNumero(''); setLibelle(''); }}
+              <button onClick={() => { setForm(false); setNumero(''); setLibelle(''); setAdresse(''); }}
                 className="flex-1 rounded-lg py-2 text-sm font-semibold" style={{ background: C.steelSoft, color: C.soft }}>
                 Annuler
               </button>
               <button disabled={!ok}
-                onClick={() => { onAdd({ numero: numero.trim(), libelle: libelle.trim() }); setNumero(''); setLibelle(''); setForm(false); }}
+                onClick={() => { onAdd({ numero: numero.trim(), libelle: libelle.trim(), adresse: adresse.trim() }); setNumero(''); setLibelle(''); setAdresse(''); setForm(false); }}
                 className="flex-1 rounded-lg py-2 text-sm font-semibold"
                 style={{ background: ok ? C.accent : C.border, color: ok ? C.ink : C.soft }}>
                 Ouvrir
@@ -3817,17 +3821,22 @@ function AffairesInline({ affaires, commandes, canManage, selected, onSelect, on
   );
 }
 
-/* =================== NOTIFICATION APPOINT =================== */
+/* =================== NOTIFICATION COMMANDE (initiale ou appoint) =================== */
 
 function NotifierSheet({ commande: c, users, units, refs, onClose, onSent }) {
   const dest = users.filter((u) => ['magasinier', 'conducteur', 'admin'].includes(u.role) && u.email);
   const sansMail = users.filter((u) => ['magasinier', 'conducteur', 'admin'].includes(u.role) && !u.email);
   const unitById = Object.fromEntries(units.map((u) => [u.id, u]));
   const refById = Object.fromEntries(refs.map((r) => [r.id, r]));
+  const libelleType = TYPES_CMD[c.type].label;
+
+  const [statut, setStatut] = useState('sending'); // 'sending' | 'envoye' | 'erreur'
+  const envoyeRef = useRef(null);
 
   const corps = [
-    `Demande d'appoint ${c.num}`,
+    `${libelleType} ${c.num}`,
     `Affaire : ${c.chantier}`,
+    c.adresse ? `Adresse de livraison : ${c.adresse}` : '',
     `Demandeur : ${c.demandeur}`,
     `Livraison souhaitee : ${frDate(c.dateLivraison)}`,
     c.note ? `Motif : ${c.note}` : '',
@@ -3841,14 +3850,34 @@ function NotifierSheet({ commande: c, users, units, refs, onClose, onSent }) {
     `Rappel : pas de livraison le jour meme, ${DELAI_LIVRAISON_H} h de preparation minimum.`,
   ].join('\n');
 
-  const mailto = `mailto:${dest.map((u) => u.email).join(',')}?subject=${encodeURIComponent(`[APII] Appoint ${c.num} — ${c.chantier}`)}&body=${encodeURIComponent(corps)}`;
+  const subject = `[APII] ${libelleType} ${c.num} — ${c.chantier}`;
+  const mailto = `mailto:${dest.map((u) => u.email).join(',')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(corps)}`;
+
+  useEffect(() => {
+    if (envoyeRef.current === c.id) return; // évite un double envoi (ex. StrictMode)
+    envoyeRef.current = c.id;
+    if (!dest.length || !supabase) { setStatut('erreur'); return; }
+    (async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke('send-commande-email', {
+          body: { to: dest.map((u) => u.email), subject, text: corps },
+        });
+        if (error || !data || data.ok !== true) throw error || new Error('echec envoi');
+        setStatut('envoye');
+        onSent(c, dest.length);
+      } catch (e) {
+        setStatut('erreur');
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [c.id]);
 
   return (
     <Sheet title={`${c.num} enregistrée`} onClose={onClose}>
       <div className="rounded-lg px-4 py-3 mb-4 text-sm" style={{ background: C.greenSoft, color: C.green }}>
         La demande est visible immédiatement dans l'application pour le magasinier et le chargé d'affaires.
       </div>
-      <SectionTitle icon={Mail} label={`Prévenir par e-mail (${dest.length})`} />
+      <SectionTitle icon={Mail} label={`Destinataires (${dest.length})`} />
       <div className="flex flex-col gap-1.5 mb-3">
         {dest.map((u) => (
           <div key={u.id} className="text-xs rounded-md px-3 py-2" style={{ background: '#FCFBF9', border: `1px solid ${C.border}` }}>
@@ -3862,14 +3891,31 @@ function NotifierSheet({ commande: c, users, units, refs, onClose, onSent }) {
           {sansMail.length} profil{sansMail.length > 1 ? 's' : ''} sans adresse e-mail ne sera{sansMail.length > 1 ? 'ont' : ''} pas prévenu{sansMail.length > 1 ? 's' : ''} par mail.
         </p>
       )}
-      <a href={dest.length ? mailto : undefined} onClick={() => dest.length && onSent(c, dest.length)}
-        className="block w-full rounded-lg py-2.5 text-sm font-semibold text-center"
-        style={{ background: dest.length ? C.accent : C.border, color: dest.length ? C.ink : C.soft, pointerEvents: dest.length ? 'auto' : 'none' }}>
-        <span className="flex items-center justify-center gap-2"><Send size={16} /> Envoyer la notification</span>
-      </a>
-      <p className="text-[11px] text-center mt-2" style={{ color: C.soft }}>
-        Ouvre votre messagerie avec le message déjà rédigé. L'envoi automatique demanderait un serveur.
-      </p>
+
+      {statut === 'sending' && (
+        <div className="rounded-lg py-2.5 text-sm font-semibold text-center flex items-center justify-center gap-2"
+          style={{ background: C.steelSoft, color: C.soft }}>
+          <Loader2 size={16} className="animate-spin" /> Envoi de la notification…
+        </div>
+      )}
+      {statut === 'envoye' && (
+        <div className="rounded-lg py-2.5 text-sm font-semibold text-center flex items-center justify-center gap-2"
+          style={{ background: C.greenSoft, color: C.green }}>
+          <CircleCheck size={16} /> Notification envoyée à {dest.length} destinataire{dest.length > 1 ? 's' : ''}
+        </div>
+      )}
+      {statut === 'erreur' && (
+        <>
+          <div className="rounded-lg px-4 py-3 mb-2 text-xs" style={{ background: C.amberSoft, color: C.amber }}>
+            L'envoi automatique n'a pas fonctionné (service de messagerie non configuré ou indisponible). Utilisez le lien ci-dessous en secours.
+          </div>
+          <a href={dest.length ? mailto : undefined} onClick={() => dest.length && onSent(c, dest.length)}
+            className="block w-full rounded-lg py-2.5 text-sm font-semibold text-center"
+            style={{ background: dest.length ? C.accent : C.border, color: dest.length ? C.ink : C.soft, pointerEvents: dest.length ? 'auto' : 'none' }}>
+            <span className="flex items-center justify-center gap-2"><Send size={16} /> Préparer l'e-mail manuellement</span>
+          </a>
+        </>
+      )}
     </Sheet>
   );
 }

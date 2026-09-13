@@ -2219,7 +2219,7 @@ function LoginScreen({ users, stockageOk, onSignIn, onCreate }) {
             </Field>
             <Field label="Adresse e-mail (pour recevoir les notifications)">
               <input type="email" style={{ ...inputStyle, borderColor: mailOk ? C.border : C.red }}
-                value={email} onChange={(e) => setEmail(e.target.value)} placeholder="prenom.nom@apii-mtp.com" />
+                value={email} onChange={(e) => setEmail(e.target.value)} placeholder="prenom.nom@apii.fr" />
             </Field>
             <Field label={role ? 'Rôle' : 'Rôle — à choisir'}>
               <div className="flex flex-col gap-2">
@@ -2860,7 +2860,7 @@ function AlertesPanel({ units, masques, emails, users, isAdmin, onAdd, onRemove,
 
       {isAdmin ? (
         <div className="flex gap-2 mb-6">
-          <input style={inputStyle} type="email" value={mail} onChange={(e) => setMail(e.target.value)} placeholder="prenom.nom@apii-mtp.com" />
+          <input style={inputStyle} type="email" value={mail} onChange={(e) => setMail(e.target.value)} placeholder="prenom.nom@apii.fr" />
           <button onClick={() => { onAdd(mail.trim().toLowerCase()); setMail(''); }} disabled={!valide}
             className="rounded-lg px-4 text-sm font-semibold flex-shrink-0"
             style={{ background: valide ? C.steel : C.border, color: valide ? '#fff' : C.soft }}>

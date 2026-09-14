@@ -1174,6 +1174,20 @@ export default function StockAPII() {
   const [stockageOk, setStockageOk] = useState(true);
   const [masquesAttribues, setMasquesAttribues] = useState([]);
 
+  /* Instantané du dernier état connu, tenu à jour à chaque persist() ET à
+     chaque rendu. Sert de base à persist() pour que deux sauvegardes
+     concurrentes (ex. clôture d'une affaire pendant l'envoi d'un e-mail en
+     arrière-plan) ne s'écrasent jamais l'une l'autre avec une capture
+     obsolète — sans ça, un persist() déclenché en retard par une fermeture
+     React périmée peut faire disparaître des données enregistrées entre
+     temps. */
+  const stateRef = useRef({
+    users, units, refs, outils, commandes, journal, alertEmails, affaires, urlPublique, masquesAttribues,
+  });
+  useEffect(() => {
+    stateRef.current = { users, units, refs, outils, commandes, journal, alertEmails, affaires, urlPublique, masquesAttribues };
+  });
+
   const [me, setMe] = useState(null);
   const [tab, setTab] = useState('commandes');
   const [openCommande, setOpenCommande] = useState(null);
@@ -1269,7 +1283,8 @@ export default function StockAPII() {
   }, []);
 
   async function persist(next) {
-    const state = { users, units, refs, outils, commandes, journal, alertEmails, affaires, urlPublique, masquesAttribues, ...next };
+    const state = { ...stateRef.current, ...next };
+    stateRef.current = state;
     setUsers(state.users); setUnits(state.units); setRefs(state.refs); setOutils(state.outils);
     setCommandes(state.commandes); setJournal(state.journal);
     setAlertEmails(state.alertEmails); setAffaires(state.affaires); setUrlPublique(state.urlPublique);
@@ -1281,7 +1296,7 @@ export default function StockAPII() {
     } catch (e) { setSaveError(true); return false; }
   }
 
-  const log = (entry, base) => [{ id: uid(), date: new Date().toISOString(), par: me ? me.name : '—', ...entry }, ...(base || journal)];
+  const log = (entry, base) => [{ id: uid(), date: new Date().toISOString(), par: me ? me.name : '—', ...entry }, ...(base || stateRef.current.journal)];
 
   /* ---------- connexion ---------- */
 

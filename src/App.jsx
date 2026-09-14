@@ -1550,13 +1550,19 @@ export default function StockAPII() {
   /* ---------- affaires ---------- */
 
   function addAffaire(d) {
-    const a = { id: uid(), numero: d.numero, libelle: d.libelle, adresse: d.adresse || '', ouverte: true };
+    const a = { id: uid(), numero: d.numero, libelle: d.libelle, adresse: d.adresse || '', ouverte: true, archivee: false };
     persist({ affaires: [a, ...affaires], journal: log({ type: 'affaire', label: libelleAffaire(a), detail: 'Affaire ouverte' }) });
   }
   function toggleAffaire(a) {
     persist({
       affaires: affaires.map((x) => (x.id === a.id ? { ...x, ouverte: !x.ouverte } : x)),
       journal: log({ type: 'affaire', label: libelleAffaire(a), detail: a.ouverte ? 'Affaire clôturée' : 'Affaire rouverte' }),
+    });
+  }
+  function toggleArchivage(a) {
+    persist({
+      affaires: affaires.map((x) => (x.id === a.id ? { ...x, archivee: !x.archivee } : x)),
+      journal: log({ type: 'affaire', label: libelleAffaire(a), detail: a.archivee ? 'Affaire désarchivée' : 'Affaire archivée' }),
     });
   }
 
@@ -1622,15 +1628,18 @@ export default function StockAPII() {
   const aPreparer = commandes.filter((c) => c.statut === 'a_preparer');
   const appointsEnAttente = aPreparer.filter((c) => c.type === 'appoint');
   const enRetard = aPreparer.filter((c) => c.dateLivraison && c.dateLivraison < todayISO());
-  /* Une commande est archivée dès que son affaire est clôturée — elle
-     quitte alors l'écran Commandes pour l'onglet Archives. Une commande
-     sans affaire retrouvée (donnée ancienne) reste visible par prudence. */
-  const affaireOuverte = (c) => {
+  /* La clôture et l'archivage d'une affaire sont deux étapes distinctes :
+     clôturer arrête juste les nouvelles commandes (l'affaire reste visible,
+     repliée, dans "Commandes") ; archiver (une action prise plus tard, sur
+     une affaire déjà clôturée) la sort de l'écran Commandes et déplace ses
+     commandes vers l'onglet Archives. */
+  const affaireArchivee = (c) => {
     const a = affaires.find((x) => x.id === c.affaireId);
-    return !a || a.ouverte;
+    return !!a && !!a.archivee;
   };
-  const commandesActives = commandes.filter(affaireOuverte);
-  const commandesArchivees = commandes.filter((c) => !affaireOuverte(c));
+  const commandesActives = commandes.filter((c) => !affaireArchivee(c));
+  const commandesArchivees = commandes.filter(affaireArchivee);
+  const affairesArchivees = affaires.filter((a) => a.archivee);
   const aSignaler = units
     .filter((u) => !u.reforme && daysUntil(prochaineRevision(u)) <= ALERTE_JOURS)
     .sort((a, b) => daysUntil(prochaineRevision(a)) - daysUntil(prochaineRevision(b)));
@@ -1786,6 +1795,7 @@ export default function StockAPII() {
             onSelect={setAffaireFilter}
             onAdd={addAffaire}
             onToggle={toggleAffaire}
+            onArchive={toggleArchivage}
           />
           {commandesActives.length === 0 ? (
             <Empty icon={ClipboardList} title="Aucune commande"
@@ -1806,11 +1816,37 @@ export default function StockAPII() {
       {tab === 'archives' && (
         <section className="px-5 mt-4">
           <p className="text-xs mb-3" style={{ color: C.soft }}>
-            Commandes des affaires clôturées — elles n'apparaissent plus dans l'onglet Commandes.
+            Affaires archivées et leurs commandes — n'apparaissent plus dans Commandes.
+            Clôturer une affaire ne l'archive pas automatiquement : c'est une étape séparée.
           </p>
+
+          {affairesArchivees.length > 0 && (
+            <>
+              <SectionTitle icon={Briefcase} label={`Affaires archivées (${affairesArchivees.length})`} />
+              <div className="flex flex-col gap-2 mb-5">
+                {affairesArchivees.map((a) => (
+                  <div key={a.id} className="rounded-lg px-3 py-2.5 flex items-center justify-between gap-3"
+                    style={{ background: C.surface, border: `1px solid ${C.border}` }}>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold">{a.numero}</p>
+                      <p className="text-xs truncate" style={{ color: C.soft }}>{a.libelle}</p>
+                    </div>
+                    {can('affaires') && (
+                      <button onClick={() => toggleArchivage(a)}
+                        className="text-[11px] font-semibold flex-shrink-0" style={{ color: C.accentInk }}>
+                        Désarchiver
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          <SectionTitle icon={ClipboardList} label={`Commandes archivées (${commandesArchivees.length})`} />
           {commandesArchivees.length === 0 ? (
-            <Empty icon={Archive} title="Aucune archive"
-              text="Les commandes des affaires que vous clôturez arriveront ici." />
+            <Empty icon={Archive} title="Aucune commande archivée"
+              text="Les commandes des affaires que vous archivez arriveront ici." />
           ) : (
             <div className="flex flex-col gap-2">
               {commandesArchivees.map((c) => <CommandeCarte key={c.id} c={c} onOpen={() => setOpenCommande(c.id)} />)}
@@ -3827,7 +3863,7 @@ function CommandePage({ type, affaires, units, refs, outils, onCancel, onSave })
 
 /* =================== AFFAIRES (affichées sur la page) =================== */
 
-function AffairesInline({ affaires, commandes, canManage, selected, onSelect, onAdd, onToggle }) {
+function AffairesInline({ affaires, commandes, canManage, selected, onSelect, onAdd, onToggle, onArchive }) {
   const [form, setForm] = useState(false);
   const [voirCloturees, setVoirCloturees] = useState(false);
   const [numero, setNumero] = useState('');
@@ -3835,8 +3871,11 @@ function AffairesInline({ affaires, commandes, canManage, selected, onSelect, on
   const [adresse, setAdresse] = useState('');
   const ok = numero.trim() && libelle.trim();
 
-  const ouvertes = affaires.filter((a) => a.ouverte);
-  const cloturees = affaires.filter((a) => !a.ouverte);
+  /* Les affaires archivées ne s'affichent plus ici du tout (ni ouvertes ni
+     clôturées) : elles ne sont visibles que dans l'onglet Archives. */
+  const nonArchivees = affaires.filter((a) => !a.archivee);
+  const ouvertes = nonArchivees.filter((a) => a.ouverte);
+  const cloturees = nonArchivees.filter((a) => !a.ouverte);
   const enCours = (id) => commandes.filter((c) => c.affaireId === id && c.statut !== 'repliee').length;
   const [confirmerId, setConfirmerId] = useState(null);
 
@@ -3860,17 +3899,26 @@ function AffairesInline({ affaires, commandes, canManage, selected, onSelect, on
             {a.adresse && <p className="text-[11px] truncate mt-0.5" style={{ color: C.soft }}>{a.adresse}</p>}
           </button>
           {canManage && (
-            <button onClick={() => (a.ouverte ? setConfirmerId(confirmation ? null : a.id) : onToggle(a))}
-              className="px-3 text-[10px] font-semibold flex-shrink-0"
-              style={{ borderLeft: `1px solid ${C.border}`, color: a.ouverte ? C.soft : C.green }}>
-              {a.ouverte ? (confirmation ? 'Annuler' : 'Clôturer') : 'Rouvrir'}
-            </button>
+            <div className="flex flex-col flex-shrink-0" style={{ borderLeft: `1px solid ${C.border}` }}>
+              <button onClick={() => (a.ouverte ? setConfirmerId(confirmation ? null : a.id) : onToggle(a))}
+                className="px-3 text-[10px] font-semibold flex-1"
+                style={{ color: a.ouverte ? C.soft : C.green }}>
+                {a.ouverte ? (confirmation ? 'Annuler' : 'Clôturer') : 'Rouvrir'}
+              </button>
+              {!a.ouverte && (
+                <button onClick={() => onArchive(a)} className="px-3 py-1 text-[10px] font-semibold"
+                  style={{ borderTop: `1px solid ${C.border}`, color: C.accentInk }}>
+                  Archiver
+                </button>
+              )}
+            </div>
           )}
         </div>
         {confirmation && (
           <div className="px-3 pb-3 pt-1" style={{ borderTop: `1px solid ${C.border}` }}>
             <p className="text-[11px] mt-2 mb-2" style={{ color: C.soft }}>
-              Ses commandes seront déplacées vers l'onglet Archives et ne s'afficheront plus dans Commandes.
+              Elle restera visible ici, repliée sous « affaires clôturées ». Vous pourrez l'archiver
+              séparément par la suite pour la sortir de cette liste.
             </p>
             <button onClick={() => { onToggle(a); setConfirmerId(null); }}
               className="w-full rounded-lg py-2 text-xs font-semibold" style={{ background: C.steel, color: '#fff' }}>

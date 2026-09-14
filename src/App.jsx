@@ -3374,19 +3374,19 @@ function UnitSheet({ unit: u, journal, commandes, canRevise, canEtat, urlPubliqu
         {canRevise && (
           editLiens ? (
             <div className="rounded-lg px-3 py-3" style={{ border: `1px dashed ${C.border}` }}>
-              <Field label="Notice d'utilisation">
-                <input style={inputStyle} value={lienNotice} onChange={(e2) => setLienNotice(e2.target.value)} placeholder="https://… (ou uploadez un PDF ci-dessous)" />
-                <input type="file" accept="application/pdf" className="text-xs mt-1.5"
+              <Field label="Notice d'utilisation (PDF)">
+                <input type="file" accept="application/pdf" style={inputStyle}
                   onChange={(e2) => uploaderDocument(e2.target.files[0], 'notices', setLienNotice, setUploadNotice)} />
                 {uploadNotice === 'envoi' && <p className="text-[11px] mt-1" style={{ color: C.soft }}>Envoi en cours…</p>}
                 {uploadNotice === 'erreur' && <p className="text-[11px] mt-1" style={{ color: C.red }}>Échec de l'envoi, réessayez.</p>}
+                {uploadNotice === 'idle' && lienNotice && <p className="text-[11px] mt-1" style={{ color: C.green }}>Fichier envoyé.</p>}
               </Field>
-              <Field label="Fiche de révision">
-                <input style={inputStyle} value={lienFiche} onChange={(e2) => setLienFiche(e2.target.value)} placeholder="https://… (ou uploadez un PDF ci-dessous)" />
-                <input type="file" accept="application/pdf" className="text-xs mt-1.5"
+              <Field label="Fiche de révision (PDF)">
+                <input type="file" accept="application/pdf" style={inputStyle}
                   onChange={(e2) => uploaderDocument(e2.target.files[0], 'fiches', setLienFiche, setUploadFiche)} />
                 {uploadFiche === 'envoi' && <p className="text-[11px] mt-1" style={{ color: C.soft }}>Envoi en cours…</p>}
                 {uploadFiche === 'erreur' && <p className="text-[11px] mt-1" style={{ color: C.red }}>Échec de l'envoi, réessayez.</p>}
+                {uploadFiche === 'idle' && lienFiche && <p className="text-[11px] mt-1" style={{ color: C.green }}>Fichier envoyé.</p>}
               </Field>
               <Field label="Date d'achat">
                 <DatePicker value={dateAchat} onChange={setDateAchat} />

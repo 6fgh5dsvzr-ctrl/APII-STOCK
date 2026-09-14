@@ -1606,6 +1606,15 @@ export default function StockAPII() {
   const aPreparer = commandes.filter((c) => c.statut === 'a_preparer');
   const appointsEnAttente = aPreparer.filter((c) => c.type === 'appoint');
   const enRetard = aPreparer.filter((c) => c.dateLivraison && c.dateLivraison < todayISO());
+  /* Une commande est archivée dès que son affaire est clôturée — elle
+     quitte alors l'écran Commandes pour l'onglet Archives. Une commande
+     sans affaire retrouvée (donnée ancienne) reste visible par prudence. */
+  const affaireOuverte = (c) => {
+    const a = affaires.find((x) => x.id === c.affaireId);
+    return !a || a.ouverte;
+  };
+  const commandesActives = commandes.filter(affaireOuverte);
+  const commandesArchivees = commandes.filter((c) => !affaireOuverte(c));
   const aSignaler = units
     .filter((u) => !u.reforme && daysUntil(prochaineRevision(u)) <= ALERTE_JOURS)
     .sort((a, b) => daysUntil(prochaineRevision(a)) - daysUntil(prochaineRevision(b)));
@@ -1702,6 +1711,7 @@ export default function StockAPII() {
         <nav className="flex gap-4 mt-3 overflow-x-auto">
           {[
             { id: 'commandes', label: 'Commandes', icon: ClipboardList },
+            { id: 'archives', label: 'Archives', icon: Archive },
             { id: 'parc', label: 'Parc', icon: Wrench },
             { id: 'conso', label: 'Consommables', icon: Package },
             { id: 'alertes', label: 'Alertes', icon: Mail },
@@ -1761,43 +1771,33 @@ export default function StockAPII() {
             onAdd={addAffaire}
             onToggle={toggleAffaire}
           />
-          {commandes.length === 0 ? (
+          {commandesActives.length === 0 ? (
             <Empty icon={ClipboardList} title="Aucune commande"
               text={can('commande') ? "Créez une commande : le magasinier la préparera en scannant." : "Le chargé d'affaires n'a pas encore créé de commande."}
               cta={can('appoint') ? (can('commande') ? 'Créer une commande' : "Demander un appoint") : null}
               onCta={() => (can('commande') ? setModal('choixCmd') : setFormCmd('appoint'))} />
           ) : (
             <div className="flex flex-col gap-2">
-              {commandes
+              {commandesActives
                 .filter((c) => affaireFilter === 'toutes' || c.affaireId === affaireFilter)
-                .map((c) => {
-                const st = STATUTS[c.statut];
-                const nbC = c.consos.reduce((a, l) => a + l.qty, 0);
-                return (
-                  <button key={c.id} onClick={() => setOpenCommande(c.id)} className="text-left rounded-lg px-4 py-3"
-                    style={{ background: C.surface, border: `1px solid ${C.border}` }}>
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="text-sm font-bold">{c.num}</span>
-                        {c.type === 'appoint' && (
-                          <span className="text-[10px] font-semibold rounded px-1.5 py-0.5" style={{ background: C.greenSoft, color: C.green }}>APPOINT</span>
-                        )}
-                      </div>
-                      <span className="text-[11px] font-semibold rounded px-2 py-0.5" style={{ background: st.soft, color: st.color }}>{st.label}</span>
-                    </div>
-                    <p className="text-sm mt-1">{c.chantier}</p>
-                    <p className="text-xs mt-0.5" style={{ color: C.soft }}>
-                      {c.unitIds.length} matériel · {nbC} consommable{nbC > 1 ? 's' : ''} · {c.demandeur}
-                    </p>
-                    {c.dateLivraison && (
-                      <p className="text-xs mt-0.5 flex items-center gap-1"
-                        style={{ color: c.statut === 'a_preparer' && c.dateLivraison < todayISO() ? C.red : C.soft }}>
-                        <CalendarClock size={11} /> Livraison {frDate(c.dateLivraison)}
-                      </p>
-                    )}
-                  </button>
-                );
-              })}
+                .map((c) => <CommandeCarte key={c.id} c={c} onOpen={() => setOpenCommande(c.id)} />)}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ---------- ARCHIVES ---------- */}
+      {tab === 'archives' && (
+        <section className="px-5 mt-4">
+          <p className="text-xs mb-3" style={{ color: C.soft }}>
+            Commandes des affaires clôturées — elles n'apparaissent plus dans l'onglet Commandes.
+          </p>
+          {commandesArchivees.length === 0 ? (
+            <Empty icon={Archive} title="Aucune archive"
+              text="Les commandes des affaires que vous clôturez arriveront ici." />
+          ) : (
+            <div className="flex flex-col gap-2">
+              {commandesArchivees.map((c) => <CommandeCarte key={c.id} c={c} onOpen={() => setOpenCommande(c.id)} />)}
             </div>
           )}
         </section>
@@ -3017,6 +3017,35 @@ function AlertesPanel({ units, masques, emails, users, isAdmin, onAdd, onRemove,
 
 /* =================== COMPOSANTS =================== *//* =================== COMPOSANTS =================== */
 
+function CommandeCarte({ c, onOpen }) {
+  const st = STATUTS[c.statut];
+  const nbC = c.consos.reduce((a, l) => a + l.qty, 0);
+  return (
+    <button onClick={onOpen} className="text-left rounded-lg px-4 py-3"
+      style={{ background: C.surface, border: `1px solid ${C.border}` }}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-sm font-bold">{c.num}</span>
+          {c.type === 'appoint' && (
+            <span className="text-[10px] font-semibold rounded px-1.5 py-0.5" style={{ background: C.greenSoft, color: C.green }}>APPOINT</span>
+          )}
+        </div>
+        <span className="text-[11px] font-semibold rounded px-2 py-0.5" style={{ background: st.soft, color: st.color }}>{st.label}</span>
+      </div>
+      <p className="text-sm mt-1">{c.chantier}</p>
+      <p className="text-xs mt-0.5" style={{ color: C.soft }}>
+        {c.unitIds.length} matériel · {nbC} consommable{nbC > 1 ? 's' : ''} · {c.demandeur}
+      </p>
+      {c.dateLivraison && (
+        <p className="text-xs mt-0.5 flex items-center gap-1"
+          style={{ color: c.statut === 'a_preparer' && c.dateLivraison < todayISO() ? C.red : C.soft }}>
+          <CalendarClock size={11} /> Livraison {frDate(c.dateLivraison)}
+        </p>
+      )}
+    </button>
+  );
+}
+
 function SectionTitle({ icon: Icon, label }) {
   return (
     <div className="flex items-center gap-1.5 mb-2">
@@ -3793,10 +3822,12 @@ function AffairesInline({ affaires, commandes, canManage, selected, onSelect, on
   const ouvertes = affaires.filter((a) => a.ouverte);
   const cloturees = affaires.filter((a) => !a.ouverte);
   const enCours = (id) => commandes.filter((c) => c.affaireId === id && c.statut !== 'repliee').length;
+  const [confirmerId, setConfirmerId] = useState(null);
 
   const Ligne = ({ a }) => {
     const on = selected === a.id;
     const n = enCours(a.id);
+    const confirmation = confirmerId === a.id;
     return (
       <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${on ? C.accent : C.border}`, background: on ? C.accentSoft : C.surface }}>
         <div className="flex items-stretch">
@@ -3813,12 +3844,24 @@ function AffairesInline({ affaires, commandes, canManage, selected, onSelect, on
             {a.adresse && <p className="text-[11px] truncate mt-0.5" style={{ color: C.soft }}>{a.adresse}</p>}
           </button>
           {canManage && (
-            <button onClick={() => onToggle(a)} className="px-3 text-[10px] font-semibold flex-shrink-0"
+            <button onClick={() => (a.ouverte ? setConfirmerId(confirmation ? null : a.id) : onToggle(a))}
+              className="px-3 text-[10px] font-semibold flex-shrink-0"
               style={{ borderLeft: `1px solid ${C.border}`, color: a.ouverte ? C.soft : C.green }}>
-              {a.ouverte ? 'Clôturer' : 'Rouvrir'}
+              {a.ouverte ? (confirmation ? 'Annuler' : 'Clôturer') : 'Rouvrir'}
             </button>
           )}
         </div>
+        {confirmation && (
+          <div className="px-3 pb-3 pt-1" style={{ borderTop: `1px solid ${C.border}` }}>
+            <p className="text-[11px] mt-2 mb-2" style={{ color: C.soft }}>
+              Ses commandes seront déplacées vers l'onglet Archives et ne s'afficheront plus dans Commandes.
+            </p>
+            <button onClick={() => { onToggle(a); setConfirmerId(null); }}
+              className="w-full rounded-lg py-2 text-xs font-semibold" style={{ background: C.steel, color: '#fff' }}>
+              Confirmer la clôture de {a.numero}
+            </button>
+          </div>
+        )}
       </div>
     );
   };

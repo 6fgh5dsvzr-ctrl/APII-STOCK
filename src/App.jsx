@@ -1301,6 +1301,19 @@ export default function StockAPII() {
     signIn(u);
   }
 
+  /* Création d'un compte équipe par l'administrateur, depuis "Mon profil" :
+     contrairement à createUser (page de connexion), on ne se connecte pas
+     au compte créé — l'administrateur reste sur sa propre session. */
+  async function createTeamUser(d) {
+    const u = { id: uid(), name: d.name, role: d.role, pin: d.pin, email: d.email || '', createdAt: new Date().toISOString() };
+    const ok = await persist({
+      users: [...users, u],
+      journal: log({ type: 'compte', label: d.name, detail: `Compte créé par ${me.name} — ${ROLES[d.role].label}` }),
+    });
+    if (!ok) setStockageOk(false);
+    return ok;
+  }
+
   const can = (action) => {
     if (!me) return false;
     if (me.role === 'admin') return true;
@@ -2070,7 +2083,7 @@ export default function StockAPII() {
       {modal === 'profil' && (
         <ProfilSheet me={me} users={users} urlPubliqueActuelle={urlPublique} onUrlPublique={(v) => persist({ urlPublique: v })}
           onClose={() => setModal(null)}
-          onRole={majRole} onSupprimer={supprimerUser} onSignOut={signOut} />
+          onRole={majRole} onSupprimer={supprimerUser} onSignOut={signOut} onCreate={createTeamUser} />
       )}
       {openRef && (
         <RefForm reference={refs.find((r) => r.id === openRef)}
@@ -2119,8 +2132,10 @@ export default function StockAPII() {
 
 function LoginScreen({ users, stockageOk, onSignIn, onCreate }) {
   const premier = users.length === 0;
-  const adminPris = users.some((u) => u.role === 'admin');
-  const rolesOuverts = Object.entries(ROLES).filter(([k]) => (premier ? k === 'admin' : k !== 'admin' || !adminPris));
+  /* Seul le tout premier profil (l'administrateur) peut se créer lui-même ici.
+     Une fois l'administrateur en place, les autres comptes sont créés par lui
+     depuis "Mon profil" — pas de création libre sur cette page publique. */
+  const rolesOuverts = Object.entries(ROLES).filter(([k]) => premier && k === 'admin');
   const [step, setStep] = useState(premier ? 'new' : 'pick');
   const [selected, setSelected] = useState(null);
   const [pin, setPin] = useState('');
@@ -2175,9 +2190,9 @@ function LoginScreen({ users, stockageOk, onSignIn, onCreate }) {
                 </button>
               ))}
             </div>
-            <button onClick={() => setStep('new')} className="mt-4 text-sm font-semibold flex items-center gap-1.5" style={{ color: C.accent }}>
-              <UserRoundPlus size={16} /> Créer un profil
-            </button>
+            <p className="text-xs mt-4" style={{ color: C.soft }}>
+              Pas encore de profil ? Demandez à l'administrateur de vous en créer un.
+            </p>
           </>
         )}
 
@@ -2301,9 +2316,20 @@ function UrlPubliqueForm({ valeur, onSave }) {
   );
 }
 
-function ProfilSheet({ me, users, urlPubliqueActuelle, onUrlPublique, onClose, onRole, onSupprimer, onSignOut }) {
+function ProfilSheet({ me, users, urlPubliqueActuelle, onUrlPublique, onClose, onRole, onSupprimer, onSignOut, onCreate }) {
   const isAdmin = me.role === 'admin';
   const [confirmer, setConfirmer] = useState(null);
+  const [ajout, setAjout] = useState(false);
+  const [nom, setNom] = useState('');
+  const [mail, setMail] = useState('');
+  const [role, setRole] = useState(null);
+  const [pinCode, setPinCode] = useState('');
+  const mailOk = mail.trim() === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail.trim());
+  const peutCreer = nom.trim() && mailOk && role && pinCode.length === 4;
+
+  function reinitialiserAjout() {
+    setAjout(false); setNom(''); setMail(''); setRole(null); setPinCode('');
+  }
 
   return (
     <Sheet title="Mon profil" onClose={onClose}>
@@ -2357,6 +2383,51 @@ function ProfilSheet({ me, users, urlPubliqueActuelle, onUrlPublique, onClose, o
           <p className="text-[11px] mb-4" style={{ color: C.soft }}>
             Le rôle d'administrateur ne peut pas être attribué : il reste sur ce compte.
           </p>
+
+          {ajout ? (
+            <div className="rounded-lg px-3 py-3 mb-4" style={{ background: C.surface, border: `1px dashed ${C.border}` }}>
+              <Field label="Nom et prénom">
+                <input style={inputStyle} value={nom} onChange={(e) => setNom(e.target.value)} placeholder="Ex. Karim B." />
+              </Field>
+              <Field label="Adresse e-mail (optionnel)">
+                <input type="email" style={{ ...inputStyle, borderColor: mailOk ? C.border : C.red }}
+                  value={mail} onChange={(e) => setMail(e.target.value)} placeholder="prenom.nom@apii.fr" />
+              </Field>
+              <Field label="Rôle">
+                <div className="flex flex-col gap-2">
+                  {Object.entries(ROLES).filter(([k]) => k !== 'admin').map(([k, r]) => {
+                    const on = role === k;
+                    return (
+                      <button key={k} onClick={() => setRole(k)} className="text-left rounded-lg px-3 py-2 flex items-center justify-between gap-2"
+                        style={{ background: on ? '#fff' : '#FCFBF9', border: `2px solid ${on ? r.color : C.border}` }}>
+                        <span className="text-sm font-semibold" style={{ color: on ? r.color : C.ink }}>{r.label}</span>
+                        {on && <Check size={14} color={r.color} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+              <Field label="Code à 4 chiffres">
+                <input type="password" inputMode="numeric" maxLength={4} style={inputStyle}
+                  value={pinCode} onChange={(e) => setPinCode(e.target.value.replace(/\D/g, ''))} placeholder="••••" />
+              </Field>
+              <div className="flex gap-2">
+                <button onClick={reinitialiserAjout} className="flex-1 rounded-lg py-2 text-sm font-semibold" style={{ background: C.steelSoft, color: C.soft }}>
+                  Annuler
+                </button>
+                <button disabled={!peutCreer}
+                  onClick={() => { onCreate({ name: nom.trim(), email: mail.trim().toLowerCase(), role, pin: pinCode }); reinitialiserAjout(); }}
+                  className="flex-1 rounded-lg py-2 text-sm font-semibold"
+                  style={{ background: peutCreer ? C.accent : C.border, color: peutCreer ? C.ink : C.soft }}>
+                  Créer le compte
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setAjout(true)} className="text-sm mb-4 flex items-center gap-1.5 font-semibold" style={{ color: C.accentInk }}>
+              <UserRoundPlus size={16} /> Ajouter un compte
+            </button>
+          )}
 
           <SectionTitle icon={QrCode} label="Lien public de l'application" />
           <UrlPubliqueForm valeur={urlPubliqueActuelle} onSave={onUrlPublique} />

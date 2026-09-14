@@ -1390,13 +1390,13 @@ export default function StockAPII() {
     setNotifier(cmd);
   }
 
-  /* Liens documentaires (notice d'utilisation, fiche de révision) : de simples
-     URL propres à chaque unité, l'application ne stocke pas de fichiers. */
-  function modifierLiens(u, lienNotice, lienFicheRevision) {
-    const nextUnits = units.map((x) => (x.id === u.id ? { ...x, lienNotice, lienFicheRevision } : x));
+  /* Liens documentaires (notice d'utilisation, fiche de révision) et date
+     d'achat : de simples champs propres à chaque unité. */
+  function modifierInfosUnite(u, patch) {
+    const nextUnits = units.map((x) => (x.id === u.id ? { ...x, ...patch } : x));
     persist({
       units: nextUnits,
-      journal: log({ type: 'creation', label: `${u.name}${u.tag ? ` · ${u.tag}` : ''}`, detail: 'Liens documentaires mis à jour' }),
+      journal: log({ type: 'creation', label: `${u.name}${u.tag ? ` · ${u.tag}` : ''}`, detail: 'Informations mises à jour' }),
     });
   }
 
@@ -2181,7 +2181,7 @@ export default function StockAPII() {
           onReformer={reformer}
           onAnnulerReforme={annulerReforme}
           onChangerEtat={changerEtat}
-          onModifierLiens={modifierLiens}
+          onModifierLiens={modifierInfosUnite}
         />
       )}
     </div>
@@ -3278,9 +3278,10 @@ function UnitSheet({ unit: u, journal, commandes, canRevise, canEtat, urlPubliqu
   const [editLiens, setEditLiens] = useState(false);
   const [lienNotice, setLienNotice] = useState(u ? u.lienNotice || '' : '');
   const [lienFiche, setLienFiche] = useState(u ? u.lienFicheRevision || '' : '');
+  const [dateAchat, setDateAchat] = useState(u ? u.dateAchat || '' : '');
   const [uploadNotice, setUploadNotice] = useState('idle'); // idle | envoi | erreur
   const [uploadFiche, setUploadFiche] = useState('idle');
-  const [exportEnCours, setExportEnCours] = useState(false);
+  const [exportEnCours, setExportEnCours] = useState(null); // null | 'vie' | 'historique'
 
   async function uploaderDocument(file, dossier, setValeur, setStatut) {
     if (!file || !u) return;
@@ -3343,6 +3344,7 @@ function UnitSheet({ unit: u, journal, commandes, canRevise, canEtat, urlPubliqu
         <Row k="Famille" v={u.type || '—'} />
         <Row k="N° de série" v={u.tag || '—'} />
         <Row k="Emplacement" v={u.lieu} />
+        {u.dateAchat && <Row k="Date d'achat" v={frDate(u.dateAchat)} />}
         <Row k="Dernière révision" v={frDate(u.dateRevision)} />
         {u.derniereFacture && <Row k="N° de facture" v={u.derniereFacture} />}
         <Row k="Prochaine révision" v={frDate(e.next)} tone={e.j < 0 ? C.red : e.j <= ALERTE_JOURS ? C.amber : undefined} />
@@ -3386,12 +3388,15 @@ function UnitSheet({ unit: u, journal, commandes, canRevise, canEtat, urlPubliqu
                 {uploadFiche === 'envoi' && <p className="text-[11px] mt-1" style={{ color: C.soft }}>Envoi en cours…</p>}
                 {uploadFiche === 'erreur' && <p className="text-[11px] mt-1" style={{ color: C.red }}>Échec de l'envoi, réessayez.</p>}
               </Field>
+              <Field label="Date d'achat">
+                <DatePicker value={dateAchat} onChange={setDateAchat} />
+              </Field>
               <div className="flex gap-2">
-                <button onClick={() => { setEditLiens(false); setLienNotice(u.lienNotice || ''); setLienFiche(u.lienFicheRevision || ''); }}
+                <button onClick={() => { setEditLiens(false); setLienNotice(u.lienNotice || ''); setLienFiche(u.lienFicheRevision || ''); setDateAchat(u.dateAchat || ''); }}
                   className="flex-1 rounded-lg py-2 text-sm font-semibold" style={{ background: C.steelSoft, color: C.soft }}>
                   Annuler
                 </button>
-                <button onClick={() => { onModifierLiens(u, lienNotice.trim(), lienFiche.trim()); setEditLiens(false); }}
+                <button onClick={() => { onModifierLiens(u, { lienNotice: lienNotice.trim(), lienFicheRevision: lienFiche.trim(), dateAchat }); setEditLiens(false); }}
                   className="flex-1 rounded-lg py-2 text-sm font-semibold" style={{ background: C.steel, color: '#fff' }}>
                   Enregistrer
                 </button>
@@ -3399,19 +3404,27 @@ function UnitSheet({ unit: u, journal, commandes, canRevise, canEtat, urlPubliqu
             </div>
           ) : (
             <button onClick={() => setEditLiens(true)} className="text-xs font-semibold flex items-center gap-1.5" style={{ color: C.soft }}>
-              <Link2 size={13} /> {u.lienNotice || u.lienFicheRevision ? 'Modifier les liens' : 'Ajouter des liens (notice, fiche de révision)'}
+              <Link2 size={13} /> {u.lienNotice || u.lienFicheRevision || u.dateAchat ? 'Modifier les informations' : "Ajouter des informations (notice, fiche de révision, date d'achat)"}
             </button>
           )
         )}
       </div>
 
       <button
-        onClick={() => { setExportEnCours(true); setTimeout(() => { try { genererPdfMateriel(u, journal, commandes, urlPublique); } finally { setExportEnCours(false); } }, 30); }}
-        disabled={exportEnCours}
+        onClick={() => { setExportEnCours('vie'); setTimeout(() => { try { genererPdfFicheVie(u, journal, urlPublique); } finally { setExportEnCours(null); } }, 30); }}
+        disabled={!!exportEnCours}
+        className="w-full mb-2 rounded-lg py-2.5 text-sm font-semibold flex items-center justify-center gap-2"
+        style={{ border: `1px solid ${C.border}`, background: C.surface, color: C.ink }}>
+        {exportEnCours === 'vie' ? <Loader2 className="animate-spin" size={15} /> : <FileDown size={16} />}
+        {exportEnCours === 'vie' ? 'Génération du PDF…' : 'Extraire la fiche de vie (PDF)'}
+      </button>
+      <button
+        onClick={() => { setExportEnCours('historique'); setTimeout(() => { try { genererPdfHistorique(u, commandes); } finally { setExportEnCours(null); } }, 30); }}
+        disabled={!!exportEnCours}
         className="w-full mb-4 rounded-lg py-2.5 text-sm font-semibold flex items-center justify-center gap-2"
         style={{ border: `1px solid ${C.border}`, background: C.surface, color: C.ink }}>
-        {exportEnCours ? <Loader2 className="animate-spin" size={15} /> : <FileDown size={16} />}
-        {exportEnCours ? 'Génération du PDF…' : 'Extraire une fiche PDF'}
+        {exportEnCours === 'historique' ? <Loader2 className="animate-spin" size={15} /> : <FileDown size={16} />}
+        {exportEnCours === 'historique' ? 'Génération du PDF…' : "Extraire l'historique d'utilisation (PDF)"}
       </button>
 
       {u.comment && (
@@ -4147,15 +4160,16 @@ function telechargerPdf(contenu, nomFichier) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-/* Fiche matériel — indépendante du bon de commande. QR, état, révisions,
-   historique d'utilisation et de réparations pour une seule unité. */
-function genererPdfMateriel(u, journal, commandes, urlPublique) {
+/* Fiche de vie — indépendante du bon de commande. QR, état, date d'achat,
+   révisions et références documentaires pour une seule unité. L'historique
+   d'utilisation est un document à part (genererPdfHistorique ci-dessous). */
+function genererPdfFicheVie(u, journal, urlPublique) {
   const marginX = 42, rightX = 553;
   const doc = new PdfDoc();
   let y = 46;
   doc.addPage();
   doc.texte(marginX, y, 'STOCK APII', { size: 16, gras: true });
-  doc.texte(rightX - 100, y, 'Fiche matériel', { size: 9, couleur: [0.43, 0.41, 0.37] });
+  doc.texte(rightX - 100, y, 'Fiche de vie', { size: 9, couleur: [0.43, 0.41, 0.37] });
   y += 10;
   doc.ligneH(marginX, y, rightX, 0.6);
   y += 26;
@@ -4170,6 +4184,7 @@ function genererPdfMateriel(u, journal, commandes, urlPublique) {
     u.type ? `Famille : ${u.type}` : null,
     `N° de série : ${u.tag || '—'}`,
     `État : ${e.label}`,
+    u.dateAchat ? `Date d'achat : ${frDate(u.dateAchat)}` : null,
     `Dernière révision : ${frDate(u.dateRevision)}  ·  Prochaine échéance : ${frDate(e.next)}`,
     u.derniereFacture ? `N° de facture (dernière révision) : ${u.derniereFacture}` : null,
   ].filter(Boolean);
@@ -4184,7 +4199,7 @@ function genererPdfMateriel(u, journal, commandes, urlPublique) {
     if (y + needed > 800) {
       doc.addPage(); y = 46;
       doc.texte(marginX, y, 'STOCK APII', { size: 13, gras: true });
-      doc.texte(rightX - 130, y, `Fiche matériel (suite) — ${u.name}`, { size: 9, couleur: [0.43, 0.41, 0.37] });
+      doc.texte(rightX - 130, y, `Fiche de vie (suite) — ${u.name}`, { size: 9, couleur: [0.43, 0.41, 0.37] });
       y += 22;
     }
   };
@@ -4210,7 +4225,37 @@ function genererPdfMateriel(u, journal, commandes, urlPublique) {
     lignesDetail.forEach((l) => { doc.texte(marginX, y, l, { size: 9, couleur: [0.43, 0.41, 0.37] }); y += 11; });
     y += 3;
   }
-  y += 6;
+
+  const nomPropre = `Fiche de vie - ${u.name}${u.tag ? ' - ' + u.tag : ''}`.replace(/[\\/:*?"<>|]+/g, '-');
+  telechargerPdf(doc.bytes(), `${nomPropre}.pdf`);
+}
+
+/* Historique d'utilisation — document séparé de la fiche de vie : chaque
+   départ/retour en chantier pour une seule unité. */
+function genererPdfHistorique(u, commandes) {
+  const marginX = 42, rightX = 553;
+  const doc = new PdfDoc();
+  let y = 46;
+  doc.addPage();
+  doc.texte(marginX, y, 'STOCK APII', { size: 16, gras: true });
+  doc.texte(rightX - 140, y, "Historique d'utilisation", { size: 9, couleur: [0.43, 0.41, 0.37] });
+  y += 10;
+  doc.ligneH(marginX, y, rightX, 0.6);
+  y += 26;
+
+  doc.texte(marginX, y, u.name, { size: 15, gras: true });
+  y += 17;
+  doc.texte(marginX, y, `N° de série : ${u.tag || '—'}`, { size: 10, couleur: [0.43, 0.41, 0.37] });
+  y += 20;
+
+  const sautDePage = (needed) => {
+    if (y + needed > 800) {
+      doc.addPage(); y = 46;
+      doc.texte(marginX, y, 'STOCK APII', { size: 13, gras: true });
+      doc.texte(rightX - 170, y, `Historique d'utilisation (suite) — ${u.name}`, { size: 9, couleur: [0.43, 0.41, 0.37] });
+      y += 22;
+    }
+  };
 
   const passages = (commandes || [])
     .filter((c) => c.charge && c.charge.unitIds.includes(u.id))
@@ -4221,7 +4266,8 @@ function genererPdfMateriel(u, journal, commandes, urlPublique) {
     }))
     .sort((a, b) => (b.depart || '').localeCompare(a.depart || ''));
 
-  titre(`Historique d'utilisation et de réparations (${passages.length})`);
+  doc.texte(marginX, y, `${passages.length} passage${passages.length > 1 ? 's' : ''} en chantier`, { size: 9.5, couleur: [0.43, 0.41, 0.37] });
+  y += 18;
   if (!passages.length) {
     doc.texte(marginX, y, "Cette unité n'est encore jamais partie en chantier.", { size: 9.5, couleur: [0.43, 0.41, 0.37] }); y += 16;
   }
@@ -4239,7 +4285,7 @@ function genererPdfMateriel(u, journal, commandes, urlPublique) {
     doc.ligneH(marginX, y - 4, rightX, 0.4);
   }
 
-  const nomPropre = `Fiche de vie - ${u.name}${u.tag ? ' - ' + u.tag : ''}`.replace(/[\\/:*?"<>|]+/g, '-');
+  const nomPropre = `Historique d'utilisation - ${u.name}${u.tag ? ' - ' + u.tag : ''}`.replace(/[\\/:*?"<>|]+/g, '-');
   telechargerPdf(doc.bytes(), `${nomPropre}.pdf`);
 }
 

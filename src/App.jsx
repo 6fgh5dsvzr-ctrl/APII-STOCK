@@ -846,9 +846,15 @@ function etatUnite(u) {
   if (j <= ALERTE_JOURS) return { key: 'bientot', label: `Révision dans ${j} j`, color: C.amber, soft: C.amberSoft, next, j };
   return { key: 'dispo', label: 'Disponible', color: C.green, soft: C.greenSoft, next, j };
 }
-const estCommandable = (u) => {
+/* Sur un chantier Plomb, la réglementation n'impose pas de suivi annuel :
+   une révision dépassée ("perime") ne bloque donc pas la commande — au
+   contraire d'un chantier Amiante. Un matériel HS reste bloqué dans tous
+   les cas, indépendamment de la nature du chantier. */
+const estCommandable = (u, tolerePerime) => {
   const e = etatUnite(u);
-  return e.key === 'dispo' || e.key === 'bientot';
+  if (e.key === 'dispo' || e.key === 'bientot') return true;
+  if (tolerePerime && e.key === 'perime') return true;
+  return false;
 };
 
 
@@ -1373,6 +1379,7 @@ export default function StockAPII() {
     const cmd = {
       id: uid(), num: `${prefixe}-${String(rang).padStart(3, '0')}`,
       type, affaireId: d.affaireId, chantier: libelleAffaire(affaire), adresse: affaire ? (affaire.adresse || '') : '',
+      natureChantier: affaire ? (affaire.nature || 'amiante') : 'amiante',
       demandeur: me.name, demandeurRole: me.role,
       dateLivraison: d.dateLivraison, note: d.note,
       unitIds: d.unitIds, consos: d.consos, outils: d.outils || [], statut: 'a_preparer',
@@ -1551,8 +1558,12 @@ export default function StockAPII() {
   /* ---------- affaires ---------- */
 
   function addAffaire(d) {
-    const a = { id: uid(), numero: d.numero, libelle: d.libelle, adresse: d.adresse || '', ouverte: true, archivee: false };
-    persist({ affaires: [a, ...affaires], journal: log({ type: 'affaire', label: libelleAffaire(a), detail: 'Affaire ouverte' }) });
+    const nature = d.nature === 'plomb' ? 'plomb' : 'amiante';
+    const a = { id: uid(), numero: d.numero, libelle: d.libelle, adresse: d.adresse || '', nature, ouverte: true, archivee: false };
+    persist({
+      affaires: [a, ...affaires],
+      journal: log({ type: 'affaire', label: libelleAffaire(a), detail: `Affaire ouverte — chantier ${nature === 'plomb' ? 'Plomb' : 'Amiante'}` }),
+    });
   }
   function toggleAffaire(a) {
     persist({
@@ -3668,8 +3679,10 @@ function CommandePage({ type, affaires, units, refs, outils, onCancel, onSave })
   const [famille, setFamille] = useState('toutes');
   const [selOnly, setSelOnly] = useState(false);
 
-  const dispo = units.filter(estCommandable);
-  const bloques = units.filter((u) => ['hs', 'perime'].includes(etatUnite(u).key));
+  const affaireChoisie = affaires.find((a) => a.id === affaireId);
+  const tolerePerime = affaireChoisie?.nature === 'plomb';
+  const dispo = units.filter((u) => estCommandable(u, tolerePerime));
+  const bloques = units.filter((u) => !estCommandable(u, tolerePerime) && ['hs', 'perime'].includes(etatUnite(u).key));
 
   const matches = (t) => t.toLowerCase().includes(search.toLowerCase());
   const familles = Array.from(new Set(dispo.map((u) => u.type || 'Autre'))).sort();
@@ -3715,9 +3728,14 @@ function CommandePage({ type, affaires, units, refs, outils, onCancel, onSave })
           <div className="px-5 mt-4">
             <Field label="Affaire">
               <select style={inputStyle} value={affaireId} onChange={(e) => setAffaireId(e.target.value)}>
-                {ouvertes.map((a) => <option key={a.id} value={a.id}>{a.numero} — {a.libelle}</option>)}
+                {ouvertes.map((a) => <option key={a.id} value={a.id}>{a.numero} — {a.libelle}{a.nature === 'plomb' ? ' (Plomb)' : ''}</option>)}
               </select>
             </Field>
+            {tolerePerime && (
+              <p className="text-xs -mt-2 mb-3" style={{ color: C.soft }}>
+                Chantier Plomb : le matériel dont la révision est dépassée reste commandable.
+              </p>
+            )}
 
             <Field label="Date de livraison souhaitée">
               <DatePicker value={dateLivraison} onChange={setDateLivraison} min={minLivraison} />
@@ -3829,7 +3847,9 @@ function CommandePage({ type, affaires, units, refs, outils, onCancel, onSave })
                           <p className="text-xs" style={{ color: C.soft }}>
                             {u.type ? `${u.type} · ` : ''}{u.tag ? `${u.tag} · ` : ''}
                             {u.etat === 'sale' && <span style={{ color: C.amber }}>sale · </span>}
-                            {e.key === 'bientot' ? <span style={{ color: C.amber }}>révision J−{e.j}</span> : `révision ${frDate(e.next)}`}
+                            {e.key === 'perime'
+                              ? <span style={{ color: C.red }}>révision dépassée le {frDate(e.next)} — toléré (Plomb)</span>
+                              : e.key === 'bientot' ? <span style={{ color: C.amber }}>révision J−{e.j}</span> : `révision ${frDate(e.next)}`}
                           </p>
                         </div>
                         <div className="rounded flex items-center justify-center flex-shrink-0"
@@ -3918,6 +3938,7 @@ function AffairesInline({ affaires, commandes, canManage, selected, onSelect, on
   const [numero, setNumero] = useState('');
   const [libelle, setLibelle] = useState('');
   const [adresse, setAdresse] = useState('');
+  const [nature, setNature] = useState('amiante');
   const ok = numero.trim() && libelle.trim();
 
   /* Les affaires archivées ne s'affichent plus ici du tout (ni ouvertes ni
@@ -3938,6 +3959,11 @@ function AffairesInline({ affaires, commandes, canManage, selected, onSelect, on
           <button onClick={() => onSelect(on ? 'toutes' : a.id)} className="flex-1 text-left px-3 py-2.5 min-w-0">
             <div className="flex items-center gap-2">
               <span className="text-sm font-bold" style={{ color: on ? C.accentInk : C.ink }}>{a.numero}</span>
+              {a.nature === 'plomb' && (
+                <span className="text-[10px] font-semibold rounded-full px-1.5 py-0.5" style={{ background: C.steelSoft, color: C.steelMid }}>
+                  Plomb
+                </span>
+              )}
               {n > 0 && (
                 <span className="text-[10px] font-semibold rounded-full px-1.5 py-0.5" style={{ background: C.steelSoft, color: C.steelMid }}>
                   {n} en cours
@@ -4025,13 +4051,35 @@ function AffairesInline({ affaires, commandes, canManage, selected, onSelect, on
             </div>
             <input style={inputStyle} className="mb-2" value={adresse} onChange={(e) => setAdresse(e.target.value)}
               placeholder="Adresse de livraison (optionnel)" />
+            <p className="text-xs font-medium mb-1.5" style={{ color: C.soft }}>Nature du chantier</p>
+            <div className="flex gap-2 mb-2">
+              {[
+                { k: 'amiante', label: 'Amiante' },
+                { k: 'plomb', label: 'Plomb' },
+              ].map((n) => {
+                const on = nature === n.k;
+                return (
+                  <button key={n.k} onClick={() => setNature(n.k)}
+                    className="flex-1 rounded-lg py-2 text-sm font-semibold"
+                    style={{ background: on ? C.steel : C.surface, color: on ? '#fff' : C.soft, border: `1px solid ${on ? C.steel : C.border}` }}>
+                    {n.label}
+                  </button>
+                );
+              })}
+            </div>
+            {nature === 'plomb' && (
+              <p className="text-[11px] mb-2" style={{ color: C.soft }}>
+                Sur un chantier Plomb, le matériel dont la révision est dépassée reste commandable
+                (la réglementation n'impose pas de suivi annuel).
+              </p>
+            )}
             <div className="flex gap-2">
-              <button onClick={() => { setForm(false); setNumero(''); setLibelle(''); setAdresse(''); }}
+              <button onClick={() => { setForm(false); setNumero(''); setLibelle(''); setAdresse(''); setNature('amiante'); }}
                 className="flex-1 rounded-lg py-2 text-sm font-semibold" style={{ background: C.steelSoft, color: C.soft }}>
                 Annuler
               </button>
               <button disabled={!ok}
-                onClick={() => { onAdd({ numero: numero.trim(), libelle: libelle.trim(), adresse: adresse.trim() }); setNumero(''); setLibelle(''); setAdresse(''); setForm(false); }}
+                onClick={() => { onAdd({ numero: numero.trim(), libelle: libelle.trim(), adresse: adresse.trim(), nature }); setNumero(''); setLibelle(''); setAdresse(''); setNature('amiante'); setForm(false); }}
                 className="flex-1 rounded-lg py-2 text-sm font-semibold"
                 style={{ background: ok ? C.accent : C.border, color: ok ? C.ink : C.soft }}>
                 Ouvrir
@@ -4063,6 +4111,7 @@ function NotifierSheet({ commande: c, users, units, refs, onClose, onSent }) {
   const corps = [
     `${libelleType} ${c.num}`,
     `Affaire : ${c.chantier}`,
+    c.natureChantier === 'plomb' ? 'Nature : Plomb (matériel en révision dépassée toléré)' : '',
     c.adresse ? `Adresse de livraison : ${c.adresse}` : '',
     `Demandeur : ${c.demandeur}`,
     `Livraison souhaitee : ${frDate(c.dateLivraison)}`,
@@ -4305,6 +4354,7 @@ function genererPdfCommande(c, unitById, refById, outilById, urlPublique) {
     doc.texte(marginX, y, c.num, { size: 13, gras: true });
     y += 14;
     doc.texte(marginX, y, `Affaire : ${c.chantier}`, { size: 9.5 }); y += 12;
+    if (c.natureChantier === 'plomb') { doc.texte(marginX, y, 'Nature : Plomb', { size: 9.5 }); y += 12; }
     doc.texte(marginX, y, `Demandeur : ${c.demandeur}`, { size: 9.5 }); y += 12;
     if (c.chargeAt) { doc.texte(marginX, y, `Livré le : ${frDateHeure(c.chargeAt)}${c.chargePar ? ' par ' + c.chargePar : ''}`, { size: 9.5 }); y += 12; }
     if (c.repliAt) { doc.texte(marginX, y, `Replié le : ${frDateHeure(c.repliAt)}${c.repliPar ? ' par ' + c.repliPar : ''}`, { size: 9.5 }); y += 12; }
@@ -4581,7 +4631,7 @@ function ScanSession({ mode, commande: c, units, refs, outils, onCancel, onValid
       if (scannedUnits[id]) { notify('Déjà scanné'); return; }
       if (isCharge) {
         const u = unitById[id];
-        if (!estCommandable(u)) { notify(`${u.name} est en quarantaine — ne pas charger`, 'err'); return; }
+        if (!estCommandable(u, c.natureChantier === 'plomb')) { notify(`${u.name} est en quarantaine — ne pas charger`, 'err'); return; }
         setScannedUnits((s) => ({ ...s, [id]: true }));
         notify(`${u.name} chargé`);
       } else {

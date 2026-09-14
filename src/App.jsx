@@ -1205,6 +1205,7 @@ export default function StockAPII() {
   const [qrVue, setQrVue] = useState('materiel');
   const [qrSearch, setQrSearch] = useState('');
   const [qrPage, setQrPage] = useState(0);
+  const [archiveOuverte, setArchiveOuverte] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -1816,40 +1817,47 @@ export default function StockAPII() {
       {tab === 'archives' && (
         <section className="px-5 mt-4">
           <p className="text-xs mb-3" style={{ color: C.soft }}>
-            Affaires archivées et leurs commandes — n'apparaissent plus dans Commandes.
-            Clôturer une affaire ne l'archive pas automatiquement : c'est une étape séparée.
+            Affaires archivées — n'apparaissent plus dans Commandes. Clôturer une affaire ne l'archive pas
+            automatiquement, c'est une étape séparée. Touchez une affaire pour voir ses commandes.
           </p>
 
-          {affairesArchivees.length > 0 && (
-            <>
-              <SectionTitle icon={Briefcase} label={`Affaires archivées (${affairesArchivees.length})`} />
-              <div className="flex flex-col gap-2 mb-5">
-                {affairesArchivees.map((a) => (
-                  <div key={a.id} className="rounded-lg px-3 py-2.5 flex items-center justify-between gap-3"
-                    style={{ background: C.surface, border: `1px solid ${C.border}` }}>
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold">{a.numero}</p>
-                      <p className="text-xs truncate" style={{ color: C.soft }}>{a.libelle}</p>
-                    </div>
-                    {can('affaires') && (
-                      <button onClick={() => toggleArchivage(a)}
-                        className="text-[11px] font-semibold flex-shrink-0" style={{ color: C.accentInk }}>
-                        Désarchiver
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-
-          <SectionTitle icon={ClipboardList} label={`Commandes archivées (${commandesArchivees.length})`} />
-          {commandesArchivees.length === 0 ? (
-            <Empty icon={Archive} title="Aucune commande archivée"
-              text="Les commandes des affaires que vous archivez arriveront ici." />
+          {affairesArchivees.length === 0 ? (
+            <Empty icon={Archive} title="Aucune affaire archivée"
+              text="Les affaires que vous archivez, avec leurs commandes, arriveront ici." />
           ) : (
             <div className="flex flex-col gap-2">
-              {commandesArchivees.map((c) => <CommandeCarte key={c.id} c={c} onOpen={() => setOpenCommande(c.id)} />)}
+              {affairesArchivees.map((a) => {
+                const ouverte = archiveOuverte === a.id;
+                const cmds = commandesArchivees.filter((c) => c.affaireId === a.id);
+                return (
+                  <div key={a.id} className="rounded-lg overflow-hidden" style={{ background: C.surface, border: `1px solid ${C.border}` }}>
+                    <div className="flex items-stretch">
+                      <button onClick={() => setArchiveOuverte(ouverte ? null : a.id)} className="flex-1 text-left px-3 py-2.5 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold">{a.numero}</span>
+                          <span className="text-[10px] font-semibold rounded-full px-1.5 py-0.5" style={{ background: C.steelSoft, color: C.steelMid }}>
+                            {cmds.length} commande{cmds.length > 1 ? 's' : ''}
+                          </span>
+                        </div>
+                        <p className="text-xs truncate mt-0.5" style={{ color: C.soft }}>{a.libelle}</p>
+                      </button>
+                      {can('affaires') && (
+                        <button onClick={() => toggleArchivage(a)} className="px-3 text-[10px] font-semibold flex-shrink-0"
+                          style={{ borderLeft: `1px solid ${C.border}`, color: C.accentInk }}>
+                          Désarchiver
+                        </button>
+                      )}
+                    </div>
+                    {ouverte && (
+                      <div className="px-3 pb-3 pt-1 flex flex-col gap-2" style={{ borderTop: `1px solid ${C.border}` }}>
+                        {cmds.length === 0
+                          ? <p className="text-xs mt-2" style={{ color: C.soft }}>Aucune commande pour cette affaire.</p>
+                          : cmds.map((c) => <CommandeCarte key={c.id} c={c} onOpen={() => setOpenCommande(c.id)} />)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>

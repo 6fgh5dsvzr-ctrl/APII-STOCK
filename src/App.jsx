@@ -1323,6 +1323,7 @@ export default function StockAPII() {
     if (action === 'scan') return me.role === 'magasinier';
     if (action === 'parc') return me.role === 'magasinier' || me.role === 'conducteur';
     if (action === 'etat') return me.role === 'conducteur'; // corriger l'état / réformer le matériel : pas le magasinier
+    if (action === 'stock') return false; // consommables et outillage : réservé à l'administrateur (bypass ci-dessus)
     return false;
   };
 
@@ -1965,13 +1966,13 @@ export default function StockAPII() {
           )}
           {refs.length === 0 ? (
             <Empty icon={Package} title="Aucune référence" text="Créez vos références de consommables pour les commander et les scanner."
-              cta={can('parc') ? 'Ajouter une référence' : null} onCta={() => setModal('ref')} />
+              cta={can('stock') ? 'Ajouter une référence' : null} onCta={() => setModal('ref')} />
           ) : (
             <div className="flex flex-col gap-2">
               {refs.map((r) => {
                 const low = r.quantity <= r.seuil;
                 return (
-                  <button key={r.id} onClick={() => can('parc') && setOpenRef(r.id)}
+                  <button key={r.id} onClick={() => can('stock') && setOpenRef(r.id)}
                     className="text-left rounded-lg px-4 py-3 flex items-center justify-between gap-3"
                     style={{ background: C.surface, border: `1px solid ${C.border}`, borderLeft: low ? `4px solid ${C.accent}` : undefined }}>
                     <p className="text-sm font-semibold truncate">{r.name}</p>
@@ -2066,7 +2067,7 @@ export default function StockAPII() {
         </section>
       )}
 
-      {((tab === 'commandes' && can('appoint')) || ((tab === 'parc' || tab === 'conso') && can('parc'))) && (
+      {((tab === 'commandes' && can('appoint')) || (tab === 'parc' && can('parc')) || (tab === 'conso' && can('stock'))) && (
         <button onClick={() => {
           if (tab === 'commandes') { if (can('commande')) setModal('choixCmd'); else setFormCmd('appoint'); }
           else setModal(tab === 'parc' ? 'unite' : consoVue === 'outils' ? 'outil' : 'ref');
@@ -2283,10 +2284,10 @@ function LoginScreen({ users, stockageOk, onSignIn, onCreate }) {
 /* =================== PROFIL ET ÉQUIPE =================== */
 
 const DROITS = {
-  conducteur: ['Ouvrir et clôturer les affaires', 'Créer les commandes et les appoints', 'Gérer le matériel et les consommables'],
-  magasinier: ['Scanner les chargements et les replis', 'Gérer le matériel et les consommables', 'Enregistrer les révisions'],
+  conducteur: ['Ouvrir et clôturer les affaires', 'Créer les commandes et les appoints', 'Gérer le matériel'],
+  magasinier: ['Scanner les chargements et les replis', 'Gérer le matériel', 'Enregistrer les révisions'],
   chantier: ["Demander des commandes d'appoint", 'Consulter le parc et les commandes'],
-  admin: ['Tous les droits', "Gérer les comptes de l'équipe", "Gérer la liste d'alerte révisions"],
+  admin: ['Tous les droits', "Gérer les comptes de l'équipe", 'Gérer le stock de consommables et l\'outillage', "Gérer la liste d'alerte révisions"],
 };
 
 function UrlPubliqueForm({ valeur, onSave }) {
